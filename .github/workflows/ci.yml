@@ -28,6 +28,7 @@ jobs:
         run: |
           cd packages/py
           pip install -e .
+          pip install pytest
           python -m pytest tests
       - name: Go tests
         run: |
