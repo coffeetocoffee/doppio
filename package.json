@@ -1,0 +1,25 @@
+{
+  "name": "doppio-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Double-shot A/B comparisons - Feature Flags and Experimentation Platform",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*",
+    "control-plane"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "test": "npm run --workspaces --if-present test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "svelte": "^5.57.2",
+    "typescript": "^7.0.2",
+    "vue": "^3.5.44"
+  }
+}

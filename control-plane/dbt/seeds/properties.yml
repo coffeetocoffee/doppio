@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: exposures_fixture
+    config:
+      column_types:
+        id: integer
+        workspace_id: text
+        environment_id: text
+        flag_key: text
+        unit_id: text
+        enabled: boolean
+        variation: text
+        bucket: integer
+        reason: text
+        occurred_at: integer
+        received_at: integer
+        idempotency_key: text

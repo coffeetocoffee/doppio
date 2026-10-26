@@ -1,0 +1,15 @@
+node_modules/
+.zig-cache/
+zig-out/
+dist/
+__pycache__/
+*.pyc
+.commandcode/
+.tools/
+*.db
+*.db-shm
+*.db-wal
+control-plane/dbt/target/
+control-plane/dbt/logs/
+control-plane/export_output/
+control-plane/test_doppio.db*

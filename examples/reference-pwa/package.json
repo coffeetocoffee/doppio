@@ -1,0 +1,14 @@
+{
+  "name": "doppio-reference-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Double-shot A/B comparisons - Reference Progressive Web App",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@doppio/js": "^0.1.0",
+    "@doppio/sw": "^0.1.0"
+  }
+}

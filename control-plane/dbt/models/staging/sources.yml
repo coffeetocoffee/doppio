@@ -1,0 +1,66 @@
+version: 2
+
+sources:
+  - name: raw
+    database: "{{ var('raw_database', env_var('DOPPIO_DB_PATH', 'fixtures/doppio_fixture.db')) }}"
+    schema: main
+    tables:
+      - name: exposures
+        identifier: exposures
+        description: "Raw exposure events from the ingest pipeline"
+        columns:
+          - name: id
+            description: "Primary key"
+            tests:
+              - unique
+              - not_null
+          - name: workspace_id
+            description: "Workspace identifier"
+            tests:
+              - not_null
+          - name: environment_id
+            description: "Environment identifier"
+            tests:
+              - not_null
+          - name: flag_key
+            description: "Feature flag key"
+            tests:
+              - not_null
+          - name: unit_id
+            description: "Experiment unit identifier (user, session, etc.)"
+            tests:
+              - not_null
+          - name: enabled
+            description: "Whether the flag was enabled for this unit"
+            tests:
+              - not_null
+          - name: variation
+            description: "Variation name (control, treatment, etc.)"
+          - name: bucket
+            description: "Bucket number for assignment"
+            tests:
+              - not_null
+          - name: reason
+            description: "Reason code for the assignment"
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ['default', 'targeting', 'rollout', 'experiment', 'override', 'conversion', 'metric', 'step_1', 'step_2', 'step_3', 'step_4', 'step_5']
+                  quote: true
+          - name: occurred_at
+            description: "Client-reported event timestamp (unix ms)"
+            tests:
+              - not_null
+          - name: received_at
+            description: "Server receive timestamp (unix ms)"
+            tests:
+              - not_null
+          - name: idempotency_key
+            description: "Optional deduplication key"
+        freshness:
+          warn_after:
+            count: 24
+            period: hour
+          error_after:
+            count: 48
+            period: hour

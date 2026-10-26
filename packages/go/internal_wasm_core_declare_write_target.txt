@@ -1,0 +1,36 @@
+package doppio
+
+import (
+	_ "embed"
+	"fmt"
+	"sync"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+)
+
+//go:embed internal/wasm/doppio.wasm
+var wasmBytes []byte
+
+const (
+	nameABIVersion = "doppio_abi_version"
+	nameBucket     = "doppio_bucket"
+	nameEnabled    = "doppio_enabled"
+	nameEvalCEL    = "doppio_eval_cel"
+
+	bufferSize = 65536 // matches libdoppio/src/wasm.zg buffer size
+)
+
+// WasmCore wraps embedded doppio WASM module.
+type WasmCore struct {
+	runtime wazero.Runtime
+	mod     api.Module
+	fns     map[string]api.Function
+
+	mu sync.Mutex // wazero calls are not goroutine-safe per instance
+}
+
+// NewWasmCore instantiates embedded doppio WASM module.
+func NewWasmCore() (*WasmCore, error) {
+	c := &WasmCore{fns: make(map[string]api.Function)}
+	if err := c.init(); err != nil {

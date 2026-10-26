@@ -1,0 +1,196 @@
+version: 2
+
+models:
+  - name: dim_flags
+    description: "Dimension table for feature flags derived from exposure data"
+    columns:
+      - name: flag_key
+        description: "Feature flag key"
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: traffic_tier
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['high', 'medium', 'low']
+
+  - name: fct_exposures
+    description: "Fact table for exposure events with experiment context"
+    columns:
+      - name: exposure_id
+        description: "Primary key from raw exposures"
+        tests:
+          - unique
+          - not_null
+      - name: flag_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: unit_id
+        tests:
+          - not_null
+      - name: enabled
+        tests:
+          - not_null
+      - name: bucket
+        tests:
+          - not_null
+      - name: reason
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['default', 'targeting', 'rollout', 'experiment', 'override', 'conversion', 'metric', 'step_1', 'step_2', 'step_3', 'step_4', 'step_5']
+
+  - name: experiment_assignments
+    description: "Experiment unit assignment view"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: unit_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        description: "Variation assigned to this unit"
+
+  - name: conversion
+    description: "Conversion rate metrics per experiment variation"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        tests:
+          - not_null
+      - name: total_units
+        tests:
+          - not_null
+      - name: conversions
+        tests:
+          - not_null
+      - name: conversion_rate
+        tests:
+          - not_null
+
+  - name: ratio
+    description: "Ratio metrics per experiment variation"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        tests:
+          - not_null
+      - name: units
+        tests:
+          - not_null
+      - name: total_value
+        tests:
+          - not_null
+      - name: total_events
+        tests:
+          - not_null
+
+  - name: distribution
+    description: "Distribution metrics per experiment variation"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        tests:
+          - not_null
+      - name: n
+        tests:
+          - not_null
+      - name: mean
+        tests:
+          - not_null
+      - name: stddev
+        tests:
+          - not_null
+
+  - name: retention
+    description: "Retention metrics per experiment variation"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        tests:
+          - not_null
+      - name: total_units
+        tests:
+          - not_null
+      - name: retention_d1
+        tests:
+          - not_null
+      - name: retention_d7
+        tests:
+          - not_null
+      - name: retention_d30
+        tests:
+          - not_null
+
+  - name: funnel
+    description: "Funnel metrics per experiment variation"
+    columns:
+      - name: experiment_key
+        tests:
+          - not_null
+      - name: workspace_id
+        tests:
+          - not_null
+      - name: environment_id
+        tests:
+          - not_null
+      - name: assigned_variation
+        tests:
+          - not_null
+      - name: step_name
+        tests:
+          - not_null
+      - name: units_reached
+        tests:
+          - not_null

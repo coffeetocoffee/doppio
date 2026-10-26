@@ -1,0 +1,26 @@
+{
+  "name": "@doppio/vue",
+  "version": "0.1.0",
+  "description": "Double-shot A/B comparisons - Vue Composition API plugin and hooks for Doppio",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@doppio/js": "^0.1.0",
+    "vue": "^3.0.0"
+  },
+  "dependencies": {
+    "@doppio/js": "^0.1.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test/*.test.js"
+  }
+}

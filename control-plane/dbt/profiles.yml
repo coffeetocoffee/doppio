@@ -1,0 +1,19 @@
+doppio_analytics:
+  target: test
+  outputs:
+    dev:
+      type: sqlite
+      schema: main
+      threads: 1
+      schemas_and_paths:
+        main: "{{ env_var('DOPPIO_DB_PATH') }}"
+      schema_directory: "."
+      database: "main"
+    test:
+      type: sqlite
+      schema: main
+      threads: 1
+      schemas_and_paths:
+        main: "fixtures/doppio_fixture.db"
+      schema_directory: "."
+      database: "main"

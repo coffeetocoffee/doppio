@@ -1,0 +1,16 @@
+{
+  "name": "Doppio Reference PWA",
+  "short_name": "Doppio PWA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#1f2937",
+  "description": "Doppio offline-capable feature flag and experimentation demo PWA",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
