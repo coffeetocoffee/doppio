@@ -23,7 +23,7 @@ jobs:
       - run: npm install
       - run: npm run build
       - name: JS tests
-        run: npm run test --workspace packages/js
+        run: cd packages/js && node --test test/doppio.test.js
       - name: Python tests
         run: |
           cd packages/py
