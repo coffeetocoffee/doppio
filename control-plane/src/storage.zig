@@ -1,9 +1,26 @@
 const std = @import("std");
 const doppio = @import("doppio");
+const sigstore = @import("backends/sigstore.zig");
+const build_options = @import("build_options");
+const postgres = if (build_options.enable_postgres) @import("backends/postgres.zig") else struct {};
+const PgBackend = if (build_options.enable_postgres) postgres.PostgresBackend else void;
 
-const c = @cImport({
-    @cInclude("sqlite3.h");
-});
+const c = struct {
+    pub const sqlite3 = opaque {};
+    pub const sqlite3_stmt = opaque {};
+    pub const SQLITE_OK: c_int = 0;
+    pub const SQLITE_ROW: c_int = 100;
+    pub const SQLITE_DONE: c_int = 101;
+    extern "c" fn sqlite3_open(path: [*:0]const u8, ppDb: *?*sqlite3) callconv(.c) c_int;
+    extern "c" fn sqlite3_prepare_v2(db: ?*sqlite3, sql: [*:0]const u8, nByte: c_int, ppStmt: *?*sqlite3_stmt, pzTail: ?*?*const u8) callconv(.c) c_int;
+    extern "c" fn sqlite3_finalize(stmt: ?*sqlite3_stmt) callconv(.c) c_int;
+    extern "c" fn sqlite3_step(stmt: ?*sqlite3_stmt) callconv(.c) c_int;
+    extern "c" fn sqlite3_bind_text(stmt: ?*sqlite3_stmt, idx: c_int, value: [*:0]const u8, n: c_int, dtor: ?*const fn (?*anyopaque) callconv(.c) void) callconv(.c) c_int;
+    extern "c" fn sqlite3_bind_null(stmt: ?*sqlite3_stmt, idx: c_int) callconv(.c) c_int;
+    extern "c" fn sqlite3_bind_int64(stmt: ?*sqlite3_stmt, idx: c_int, value: i64) callconv(.c) c_int;
+    extern "c" fn sqlite3_reset(stmt: ?*sqlite3_stmt) callconv(.c) c_int;
+    extern "c" fn sqlite3_changes(db: ?*sqlite3) callconv(.c) c_int;
+};
 
 pub const SQLITE_SCHEMA_DDL =
     \\CREATE TABLE IF NOT EXISTS organizations (
@@ -125,6 +142,8 @@ pub const AuditRecord = struct {
     /// any edit or removal breaks every later link in the chain.
     hash: [32]u8,
     prev_hash: [32]u8,
+    /// HMAC-SHA256 signature over the record (Sigstore-style audit signing).
+    signature: ?[]const u8 = null,
 };
 
 pub const FlagRecord = struct {
@@ -174,16 +193,77 @@ pub const ExposureRow = struct {
 
 fn noop_destructor(_: ?*anyopaque) callconv(.c) void {}
 
+/// Selects the durable storage implementation. SQLite remains the default for
+/// dev/tests; Postgres is the production primary (see backends/postgres.zig).
+pub const BackendKind = enum { sqlite, postgres };
+
 pub const Storage = struct {
     allocator: std.mem.Allocator,
     flags: std.StringHashMap(FlagRecord),
     segments: std.StringHashMap(SegmentRecord),
     environments: std.ArrayList(EnvironmentRecord),
     audit_events: std.ArrayList(AuditRecord),
+    /// Active durable backend selection.
+    backend: BackendKind = .sqlite,
     /// Open SQLite handle for durable exposure storage. Null while the
     /// in-memory maps above are the only state, which is the case in tests.
     db: ?*c.sqlite3 = null,
     db_path: []const u8 = "",
+    /// Optional Postgres connection (only present when built with -Dpostgres).
+    pg: ?PgBackend = null,
+
+    /// Choose the durable backend. Postgres wiring lives in backends/postgres.zig;
+    /// callers should open the corresponding connection after selecting it.
+    pub fn selectBackend(self: *Storage, kind: BackendKind) void {
+        self.backend = kind;
+    }
+
+    /// Connect to Postgres and apply the schema. Requires -Dpostgres.
+    pub const openPostgres = if (build_options.enable_postgres) openPostgresImpl else openPostgresDisabled;
+
+    fn openPostgresImpl(self: *Storage, conninfo: []const u8) !void {
+        const owned = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{conninfo}, 0);
+        defer self.allocator.free(owned);
+        var backend: PgBackend = .{};
+        try backend.connect(owned);
+        backend.initSchema();
+        self.pg = backend;
+        self.backend = .postgres;
+    }
+
+    fn openPostgresDisabled(_: *Storage, _: []const u8) !void {
+        return error.PostgresNotEnabled;
+    }
+
+    /// Mirror a flag row into Postgres when that backend is active.
+    const persistFlag = if (build_options.enable_postgres) persistFlagImpl else persistFlagNoop;
+
+    fn persistFlagImpl(self: *Storage, rec: FlagRecord) void {
+        if (self.backend != .postgres) return;
+        if (self.pg) |*backend| {
+            const sql = std.fmt.allocPrintSentinel(
+                self.allocator,
+                "INSERT INTO flags (id, workspace_id, environment_id, key, enabled, rollout_percentage, version, created_at, updated_at) " ++
+                    "VALUES ('{s}', 'default', 'default', '{s}', {s}, {d}, {d}, {d}, {d}) " ++
+                    "ON CONFLICT (workspace_id, environment_id, key) DO UPDATE SET enabled = EXCLUDED.enabled, " ++
+                    "rollout_percentage = EXCLUDED.rollout_percentage, version = EXCLUDED.version, updated_at = EXCLUDED.updated_at",
+                .{
+                    rec.key,
+                    rec.key,
+                    if (rec.enabled) "TRUE" else "FALSE",
+                    rec.rollout_percentage,
+                    rec.version,
+                    rec.created_at,
+                    rec.updated_at,
+                },
+                0,
+            ) catch return;
+            defer self.allocator.free(sql);
+            backend.exec(sql);
+        }
+    }
+
+    fn persistFlagNoop(_: *Storage, _: FlagRecord) void {}
 
     pub fn init(allocator: std.mem.Allocator) Storage {
         var s = Storage{
@@ -234,7 +314,7 @@ pub const Storage = struct {
 
     fn bindText(stmt: ?*c.sqlite3_stmt, idx: c_int, value: ?[]const u8) !void {
         if (value) |v| {
-            const rc = c.sqlite3_bind_text(stmt, idx, @as([*c]const u8, @ptrCast(v.ptr)), @intCast(v.len), noop_destructor);
+            const rc = c.sqlite3_bind_text(stmt, idx, @as([*c]const u8, @ptrCast(v.ptr)), @intCast(v.len), &noop_destructor);
             if (rc != c.SQLITE_OK) return error.SqliteBindFailed;
         } else {
             const rc = c.sqlite3_bind_null(stmt, idx);
@@ -324,8 +404,12 @@ pub const Storage = struct {
         self.environments.deinit(self.allocator);
         for (self.audit_events.items) |evt| {
             self.allocator.free(evt.id);
+            if (evt.signature) |s| self.allocator.free(s);
         }
         self.audit_events.deinit(self.allocator);
+        if (comptime build_options.enable_postgres) {
+            if (self.pg) |*p| p.deinit();
+        }
     }
 
     pub fn putFlag(self: *Storage, key: []const u8, record: FlagRecord, actor: []const u8) !void {
@@ -337,7 +421,16 @@ pub const Storage = struct {
             gop.key_ptr.* = owned;
             gop.value_ptr.* = applyVersion(null, record, owned, 0);
         }
+        self.persistFlag(gop.value_ptr.*);
         try self.recordAudit("FLAG_UPDATE", "flag", key, actor);
+    }
+
+    /// Free the owned strings inside edges produced by flagDependencies.
+    pub fn freeDependencyEdges(self: *const Storage, edges: []const DependencyEdge) void {
+        for (edges) |edge| {
+            self.allocator.free(edge.from_key);
+            self.allocator.free(edge.variation_key);
+        }
     }
 
     /// Same as putFlag, but stamps created/updated timestamps so staleness and
@@ -351,6 +444,7 @@ pub const Storage = struct {
             gop.key_ptr.* = owned;
             gop.value_ptr.* = applyVersion(null, record, owned, now_ms);
         }
+        self.persistFlag(gop.value_ptr.*);
         try self.recordAudit("FLAG_UPDATE", "flag", key, actor);
     }
 
@@ -429,10 +523,12 @@ pub const Storage = struct {
                         const dep = item.object.get("flagKey") orelse continue;
                         const variation = item.object.get("variationKey") orelse continue;
                         if (dep != .string or variation != .string) continue;
+                        const from_owned = try self.allocator.dupe(u8, dep.string);
+                        const variation_owned = try self.allocator.dupe(u8, variation.string);
                         try out.append(self.allocator, .{
-                            .from_key = dep.string,
+                            .from_key = from_owned,
                             .to_key = flag_key,
-                            .variation_key = variation.string,
+                            .variation_key = variation_owned,
                         });
                     }
                 }
@@ -491,6 +587,7 @@ pub const Storage = struct {
                         break;
                     }
                 }
+                self.freeDependencyEdges(edges.items);
             }
         }
         return out;
@@ -545,9 +642,13 @@ pub const Storage = struct {
         const prev_hash: [32]u8 = if (self.audit_events.items.len > 0)
             self.audit_events.items[self.audit_events.items.len - 1].hash
         else
-            [_]u8{0}**32;
+            @as([32]u8, @splat(0));
         const timestamp = @as(i64, @intCast(self.audit_events.items.len + 1));
         const hash = try computeAuditHash(self.allocator, prev_hash, id, action, target_type, target_id, actor, timestamp);
+
+        // Sigstore-style: sign the record hash via the Sigstore backend.
+        const mac = sigstore.SigstoreSigner.sign(&hash);
+        const sig = try self.allocator.dupe(u8, &mac);
 
         try self.audit_events.append(self.allocator, .{
             .id = id,
@@ -558,8 +659,38 @@ pub const Storage = struct {
             .timestamp = timestamp,
             .hash = hash,
             .prev_hash = prev_hash,
+            .signature = sig,
         });
+        self.persistAudit(id, action, target_type, target_id, actor, timestamp);
     }
+
+    /// Mirror an audit event into Postgres when that backend is active.
+    const persistAudit = if (build_options.enable_postgres) persistAuditImpl else persistAuditNoop;
+
+    fn persistAuditImpl(
+        self: *Storage,
+        id: []const u8,
+        action: []const u8,
+        target_type: []const u8,
+        target_id: []const u8,
+        actor: []const u8,
+        timestamp: i64,
+    ) void {
+        if (self.backend != .postgres) return;
+        if (self.pg) |*backend| {
+            const sql = std.fmt.allocPrintSentinel(
+                self.allocator,
+                "INSERT INTO audit_events (id, workspace_id, action, target_type, target_id, actor, timestamp) " ++
+                    "VALUES ('{s}', 'default', '{s}', '{s}', '{s}', '{s}', {d})",
+                .{ id, action, target_type, target_id, actor, timestamp },
+                0,
+            ) catch return;
+            defer self.allocator.free(sql);
+            backend.exec(sql);
+        }
+    }
+
+    fn persistAuditNoop(_: *Storage, _: []const u8, _: []const u8, _: []const u8, _: []const u8, _: []const u8, _: i64) void {}
 
     /// Deterministic hash chain link. Recomputed by verifyAuditChain to detect
     /// tampering with any past record.
@@ -604,7 +735,7 @@ pub const Storage = struct {
     /// Recompute the whole chain and report the first record that no longer
     /// matches its stored link.
     pub fn verifyAuditChain(self: *const Storage) AuditVerification {
-        var prev_hash = [_]u8{0}**32;
+        var prev_hash = @as([32]u8, @splat(0));
         for (self.audit_events.items) |evt| {
             const expected = computeAuditHash(
                 self.allocator,
@@ -620,6 +751,16 @@ pub const Storage = struct {
             };
             if (!std.mem.eql(u8, &expected, &evt.hash)) {
                 return .{ .ok = false, .checked = 0, .first_broken_id = evt.id, .head_hash = prev_hash };
+            }
+            // Verify Sigstore signature when present.
+            if (evt.signature) |sigbytes| {
+                if (sigbytes.len == 32) {
+                    var sigarr: [32]u8 = undefined;
+                    @memcpy(&sigarr, sigbytes[0..32]);
+                    if (!sigstore.SigstoreSigner.verify(&evt.hash, sigarr)) {
+                        return .{ .ok = false, .checked = 0, .first_broken_id = evt.id, .head_hash = prev_hash };
+                    }
+                }
             }
             prev_hash = evt.hash;
         }
@@ -802,4 +943,20 @@ test "storage CRUD and audit tracking" {
     try std.testing.expect(deleted);
     try std.testing.expect(store.getFlag("flag-alpha") == null);
     try std.testing.expectEqual(@as(usize, 2), store.audit_events.items.len);
+}
+
+test "storage defaults to sqlite and can select postgres" {
+    var store = Storage.init(std.testing.allocator);
+    defer store.deinit();
+
+    try std.testing.expectEqual(BackendKind.sqlite, store.backend);
+    store.selectBackend(.postgres);
+    try std.testing.expectEqual(BackendKind.postgres, store.backend);
+}
+
+test "openPostgres reports disabled unless built with -Dpostgres" {
+    if (build_options.enable_postgres) return;
+    var store = Storage.init(std.testing.allocator);
+    defer store.deinit();
+    try std.testing.expectError(error.PostgresNotEnabled, store.openPostgres("host=localhost"));
 }

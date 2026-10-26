@@ -628,6 +628,7 @@ test "flag dependencies come from prerequisites and segment references" {
 
     var edges: std.ArrayList(storage.DependencyEdge) = .empty;
     defer edges.deinit(store.allocator);
+    defer store.freeDependencyEdges(edges.items);
     var segments: std.ArrayList([]const u8) = .empty;
     defer segments.deinit(store.allocator);
     try store.flagDependencies("child-flag", &edges, &segments);
@@ -639,6 +640,7 @@ test "flag dependencies come from prerequisites and segment references" {
     // A flag with no prerequisites yields no edges.
     var none_edges: std.ArrayList(storage.DependencyEdge) = .empty;
     defer none_edges.deinit(store.allocator);
+    defer store.freeDependencyEdges(none_edges.items);
     var none_segs: std.ArrayList([]const u8) = .empty;
     defer none_segs.deinit(store.allocator);
     try store.flagDependencies("parent-flag", &none_edges, &none_segs);
@@ -653,6 +655,7 @@ test "flag dependencies come from prerequisites and segment references" {
     }, "alice");
     var edges2: std.ArrayList(storage.DependencyEdge) = .empty;
     defer edges2.deinit(store.allocator);
+    defer store.freeDependencyEdges(edges2.items);
     var segments2: std.ArrayList([]const u8) = .empty;
     defer segments2.deinit(store.allocator);
     try store.flagDependencies("ruled", &edges2, &segments2);

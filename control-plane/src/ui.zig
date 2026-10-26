@@ -912,7 +912,8 @@ fn dependencyGraph(arena: std.mem.Allocator, out: *Io.Writer, hub: *sync.SyncHub
     var seg_refs: std.ArrayList([]const u8) = .empty;
     defer seg_refs.deinit(arena);
     var dep_edges: std.ArrayList(storage.DependencyEdge) = .empty;
-    defer dep_edges.deinit(arena);
+    defer dep_edges.deinit(hub.store.allocator);
+    defer hub.store.freeDependencyEdges(dep_edges.items);
     try hub.store.flagDependencies(key, &dep_edges, &seg_refs);
 
     var dependents = try hub.store.dependentsOf(key);

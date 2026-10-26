@@ -139,10 +139,10 @@ test "readFrame decodes masked client frames" {
 }
 
 test "extended 16-bit payload length" {
-    const payload = "x"**300;
+    const payload = @as([300]u8, @splat('x'));
     var out_buf: [1024]u8 = undefined;
     var writer = Io.Writer.fixed(&out_buf);
-    try writeFrame(&writer, .text, payload);
+    try writeFrame(&writer, .text, &payload);
     // 2 byte header (7-bit length 126 marker) + 2 byte extended length + payload
     try std.testing.expectEqual(4 + payload.len, writer.buffered().len);
 
@@ -150,5 +150,5 @@ test "extended 16-bit payload length" {
     var payload_buf: [512]u8 = undefined;
     const frame = try readFrame(&reader, &payload_buf);
     try std.testing.expectEqual(payload.len, frame.payload.len);
-    try std.testing.expectEqualStrings(payload, frame.payload);
+    try std.testing.expectEqualStrings(&payload, frame.payload);
 }

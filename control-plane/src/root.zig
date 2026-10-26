@@ -9,6 +9,8 @@ pub const admin = @import("admin.zig");
 pub const ui = @import("ui.zig");
 pub const blastradius = @import("blastradius.zig");
 pub const experiment = @import("experiment.zig");
+pub const sigstore = @import("backends/sigstore.zig");
+pub const clickhouse = @import("backends/clickhouse.zig");
 
 test {
     _ = server;
@@ -22,4 +24,6 @@ test {
     _ = ui;
     _ = blastradius;
     _ = experiment;
+    _ = sigstore;
+    _ = clickhouse;
 }

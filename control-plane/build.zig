@@ -4,6 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const enable_postgres = b.option(bool, "postgres", "Link libpq and enable the Postgres backend") orelse false;
+    const enable_valkey = b.option(bool, "valkey", "Link hiredis and enable the Valkey backend") orelse false;
+
+    const options = b.addOptions();
+    options.addOption(bool, "enable_postgres", enable_postgres);
+    options.addOption(bool, "enable_valkey", enable_valkey);
+
     const doppio = b.addModule("doppio", .{
         .root_source_file = b.path("../libdoppio/src/root.zig"),
     });
@@ -16,6 +23,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "doppio", .module = doppio },
+                .{ .name = "build_options", .module = options.createModule() },
             },
             .link_libc = true,
         }),
@@ -26,6 +34,12 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("vendor/sqlite"));
     exe.root_module.addCMacro("SQLITE_THREADSAFE", "1");
     exe.root_module.addCMacro("SQLITE_OMIT_LOAD_EXTENSION", "1");
+    if (enable_postgres) {
+        exe.root_module.addIncludePath(b.path("../.tools/postgres/pgsql/include"));
+        exe.root_module.addLibraryPath(b.path("../.tools/postgres/pgsql/lib"));
+        exe.root_module.linkSystemLibrary("libpq", .{});
+    }
+    if (enable_valkey) exe.root_module.linkSystemLibrary("hiredis", .{});
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -41,6 +55,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "doppio", .module = doppio },
+                .{ .name = "build_options", .module = options.createModule() },
             },
             .link_libc = true,
         }),
@@ -51,6 +66,12 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addIncludePath(b.path("vendor/sqlite"));
     tests.root_module.addCMacro("SQLITE_THREADSAFE", "1");
     tests.root_module.addCMacro("SQLITE_OMIT_LOAD_EXTENSION", "1");
+    if (enable_postgres) {
+        tests.root_module.addIncludePath(b.path("../.tools/postgres/pgsql/include"));
+        tests.root_module.addLibraryPath(b.path("../.tools/postgres/pgsql/lib"));
+        tests.root_module.linkSystemLibrary("libpq", .{});
+    }
+    if (enable_valkey) tests.root_module.linkSystemLibrary("hiredis", .{});
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run control plane unit tests");
     test_step.dependOn(&run_tests.step);

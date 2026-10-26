@@ -1,6 +1,10 @@
 const std = @import("std");
 const doppio = @import("doppio");
 const storage = @import("storage.zig");
+const clickhouse = @import("backends/clickhouse.zig");
+const build_options = @import("build_options");
+const valkey = if (build_options.enable_valkey) @import("backends/valkey.zig") else struct {};
+const ValkeyBackend = if (build_options.enable_valkey) valkey.ValkeyBackend else void;
 const admin = @import("admin.zig");
 const experiment = @import("experiment.zig");
 
@@ -164,6 +168,11 @@ pub const SyncHub = struct {
     experiments: experiment.ExperimentRegistry,
     /// WebSocket clients, guarded by the hub mutex.
     connections: std.ArrayList(*ConnHandle),
+    /// Optional ClickHouse backend for analytics/ exposure ingestion.
+    clickhouse: ?clickhouse.ClickHouseBackend = null,
+    /// Optional Valkey backend for multi-node pub/sub fan-out (only present
+    /// when built with -Dvalkey, since it links libhiredis).
+    valkey_backend: ?ValkeyBackend = null,
 
     pub fn init(allocator: std.mem.Allocator) SyncHub {
         return .{
@@ -185,6 +194,54 @@ pub const SyncHub = struct {
         return hub;
     }
 
+    /// Enable ClickHouse exposure forwarding for this hub.
+    pub fn enableClickHouse(self: *SyncHub, endpoint: []const u8) !void {
+        const owned = try self.allocator.dupe(u8, endpoint);
+        self.clickhouse = clickhouse.ClickHouseBackend.init(owned);
+    }
+
+    /// Enable Valkey pub/sub fan-out. No-op unless built with -Dvalkey.
+    pub const enableValkey = if (build_options.enable_valkey) enableValkeyImpl else enableValkeyNoop;
+
+    fn enableValkeyImpl(self: *SyncHub, host: []const u8, port: c_int) !void {
+        const owned = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{host}, 0);
+        defer self.allocator.free(owned);
+        var backend: ValkeyBackend = .{};
+        try backend.connect(owned, port);
+        self.valkey_backend = backend;
+    }
+
+    fn enableValkeyNoop(_: *SyncHub, _: []const u8, _: c_int) !void {}
+
+    const publishValkey = if (build_options.enable_valkey) publishValkeyImpl else publishValkeyNoop;
+
+    fn publishValkeyImpl(self: *SyncHub, seq: u64) void {
+        if (self.valkey_backend) |*v| {
+            const msg = std.fmt.allocPrintSentinel(self.allocator, "delta:{d}", .{seq}, 0) catch return;
+            defer self.allocator.free(msg);
+            const chan = std.fmt.allocPrintSentinel(self.allocator, "{s}", .{"doppio:flags"}, 0) catch return;
+            defer self.allocator.free(chan);
+            v.publish(chan, msg);
+        }
+    }
+
+    fn publishValkeyNoop(_: *SyncHub, _: u64) void {}
+
+    /// Cache a flag definition in Valkey (shared across nodes) with a 60s TTL.
+    pub const cacheFlag = if (build_options.enable_valkey) cacheFlagImpl else cacheFlagNoop;
+
+    fn cacheFlagImpl(self: *SyncHub, key: []const u8, value: []const u8) void {
+        if (self.valkey_backend) |*v| {
+            const prefix = std.fmt.allocPrintSentinel(self.allocator, "flag:{s}", .{key}, 0) catch return;
+            defer self.allocator.free(prefix);
+            const val = std.fmt.allocPrintSentinel(self.allocator, "{s}", .{value}, 0) catch return;
+            defer self.allocator.free(val);
+            v.set(prefix, val, 60);
+        }
+    }
+
+    fn cacheFlagNoop(_: *SyncHub, _: []const u8, _: []const u8) void {}
+
     pub fn deinit(self: *SyncHub) void {
         for (self.history.items) |item| {
             self.allocator.free(item.key);
@@ -201,6 +258,10 @@ pub const SyncHub = struct {
         // Connection handles are owned by their connection threads, which
         // unregister and destroy them. The hub only borrowed them here.
         self.connections.deinit(self.allocator);
+        if (self.clickhouse) |ch| self.allocator.free(ch.endpoint);
+        if (comptime build_options.enable_valkey) {
+            if (self.valkey_backend) |*v| v.deinit();
+        }
         self.store.deinit();
     }
 
@@ -294,6 +355,20 @@ pub const SyncHub = struct {
             const delta = try self.buildDeltaLocked(self.allocator, self.current_seq - 1);
             defer self.allocator.free(delta.json);
             try self.broadcastLocked(io, delta.json);
+        }
+        // Fan out to other nodes when Valkey is enabled.
+        self.publishValkey(self.current_seq);
+        // Warm the shared flag cache with the latest definition.
+        {
+            const cached = std.fmt.allocPrint(
+                self.allocator,
+                "{{\"enabled\":{d},\"rollout\":{d},\"deleted\":{d}}}",
+                .{ @intFromBool(enabled), rollout_percentage, @intFromBool(deleted) },
+            ) catch null;
+            if (cached) |cv| {
+                defer self.allocator.free(cv);
+                self.cacheFlag(key, cv);
+            }
         }
 
         return self.current_seq;
@@ -508,6 +583,21 @@ pub const SyncHub = struct {
             }
             if (self.store.db != null) {
                 _ = try self.store.insertExposureBatch(rows.items);
+            }
+            // Forward the batch to ClickHouse when configured.
+            if (self.clickhouse) |*ch| {
+                var payload: std.ArrayList(u8) = .empty;
+                defer payload.deinit(self.allocator);
+                for (rows.items) |row| {
+                    const line = try std.fmt.allocPrint(
+                        self.allocator,
+                        "{{\"workspace_id\":\"{s}\",\"flag_key\":\"{s}\",\"unit_id\":\"{s}\",\"enabled\":{d}}}\n",
+                        .{ row.workspace_id, row.flag_key, row.unit_id, @intFromBool(row.enabled) },
+                    );
+                    defer self.allocator.free(line);
+                    try payload.appendSlice(self.allocator, line);
+                }
+                _ = ch.insertBatch(payload.items);
             }
 
             for (self.exposures.items[0..flushed]) |exp| {
@@ -789,4 +879,14 @@ test "exposure ingest never requires the hub lock" {
 
     const seq = try hub.recordChange(io, "seam-flag", false, true, 100);
     try std.testing.expectEqual(@as(u64, 2), seq);
+}
+
+test "enableClickHouse configures the analytics backend" {
+    var hub = SyncHub.init(std.testing.allocator);
+    defer hub.deinit();
+
+    try std.testing.expect(hub.clickhouse == null);
+    try hub.enableClickHouse("http://localhost:8123");
+    try std.testing.expect(hub.clickhouse != null);
+    try std.testing.expectEqualStrings("http://localhost:8123", hub.clickhouse.?.endpoint);
 }
