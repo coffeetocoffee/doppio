@@ -22,7 +22,8 @@ jobs:
           go-version: "1.22"
       - run: npm install
       - run: npm run build
-      - run: npm test
+      - name: JS tests
+        run: npm run test --workspace packages/js
       - name: Python tests
         run: |
           cd packages/py
