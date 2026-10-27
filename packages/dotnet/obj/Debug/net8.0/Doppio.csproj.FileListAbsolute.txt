@@ -1,0 +1,13 @@
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.AssemblyInfoInputs.cache
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.AssemblyInfo.cs
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.csproj.CoreCompileInputs.cache
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.sourcelink.json
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\bin\Debug\net8.0\native\win-x64\doppio.dll
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\bin\Debug\net8.0\Doppio.deps.json
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\bin\Debug\net8.0\Doppio.dll
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\bin\Debug\net8.0\Doppio.pdb
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.dll
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\refint\Doppio.dll
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\Doppio.pdb
+C:\Users\Rizqi\Documents\Default Project\doppio\packages\dotnet\obj\Debug\net8.0\ref\Doppio.dll
