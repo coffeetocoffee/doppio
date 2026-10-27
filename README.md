@@ -14,8 +14,8 @@ Evaluate flags locally, sync deltas in real time, track exposures — one core, 
 | JS SDK | `packages/js` | ✅ |
 | Python SDK | `packages/py` | ✅ |
 | Go SDK | `packages/go` | ✅ |
-| .NET SDK | `packages/dotnet` | 🚧 |
-| Kotlin SDK | `packages/kotlin` | 🚧 |
+| .NET SDK | `packages/dotnet` | ✅ |
+| Kotlin SDK | `packages/kotlin` | ✅ |
 | Control plane (Zig) | `control-plane` | ✅ |
 
 ## Quick start
