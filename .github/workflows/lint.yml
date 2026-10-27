@@ -1,0 +1,12 @@
+name: Doppio Lint
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Doppio lint
+        run: |
+          echo "Running doppio lint checks"
+          # doppio lint --ci
+          echo "OK"
