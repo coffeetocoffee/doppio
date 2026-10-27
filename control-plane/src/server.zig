@@ -66,6 +66,22 @@ pub const Server = struct {
             };
         }
 
+        if (std.mem.eql(u8, path, "/metrics")) {
+            const metrics_body = "# HELP doppio_health Health status\n# TYPE doppio_health gauge\ndoppio_health 1\n";
+            return .{
+                .status = .ok,
+                .content_type = "text/plain; version=0.0.4",
+                .body = metrics_body,
+            };
+        }
+
+        if (std.mem.eql(u8, path, "/api/v1/webhooks")) {
+            return .{
+                .status = .ok,
+                .body = "{\"subscriptions\":[]}",
+            };
+        }
+
         if (std.mem.eql(u8, path, "/openapi.json")) {
             return .{
                 .status = .ok,
