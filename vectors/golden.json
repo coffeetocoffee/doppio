@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "vectors": [
+    {
+      "id": "empty-context",
+      "description": "No context provided; anonymous bucketing",
+      "flags": [{ "key": "f", "enabled": true, "rolloutPercentage": 100 }],
+      "context": {},
+      "expected": { "value": true, "reason": "DEFAULT" }
+    },
+    {
+      "id": "disabled-flag",
+      "description": "Disabled flag returns false regardless of rollout",
+      "flags": [{ "key": "f", "enabled": false, "rolloutPercentage": 100 }],
+      "context": { "targetingKey": "u1" },
+      "expected": { "value": false, "reason": "DISABLED" }
+    },
+    {
+      "id": "missing-flag",
+      "description": "Unknown flag returns default",
+      "flags": [],
+      "context": { "targetingKey": "u1" },
+      "expected": { "value": true, "reason": "DEFAULT" }
+    },
+    {
+      "id": "non-ascii-key",
+      "description": "Unicode flag key evaluates",
+      "flags": [{ "key": "café", "enabled": true, "rolloutPercentage": 100 }],
+      "context": { "targetingKey": "u1" },
+      "expected": { "value": true, "reason": "DEFAULT" }
+    },
+    {
+      "id": "rollout-zero",
+      "description": "0% rollout excludes everyone",
+      "flags": [{ "key": "f", "enabled": true, "rolloutPercentage": 0 }],
+      "context": { "targetingKey": "u1" },
+      "expected": { "value": false, "reason": "DEFAULT" }
+    },
+    {
+      "id": "rule-short-circuit",
+      "description": "First matching rule wins",
+      "flags": [{
+        "key": "f", "enabled": true, "rolloutPercentage": 100,
+        "rules": [
+          { "id": "r1", "expression": "user.plan == \"premium\"", "variation": 0 },
+          { "id": "r2", "expression": "true", "variation": 1 }
+        ],
+        "variations": [{ "key": "on", "value": "true" }, { "key": "off", "value": "false" }],
+        "defaultVariation": 0
+      }],
+      "context": { "targetingKey": "u1", "custom": { "plan": "premium" } },
+      "expected": { "value": true, "reason": "RULE_MATCH" }
+    },
+    {
+      "id": "determinism",
+      "description": "Same inputs yield same result",
+      "flags": [{ "key": "f", "enabled": true, "rolloutPercentage": 50 }],
+      "context": { "targetingKey": "user-123" },
+      "expected": { "value": true, "reason": "DEFAULT" }
+    }
+  ]
+}
