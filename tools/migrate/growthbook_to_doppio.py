@@ -6,9 +6,7 @@ def convert(features):
         key = f.get("id")
         # JSONLogic conditions are inexpressible in Doppio rules
         report["manual"].append({"key": key, "reasons": [{"field": "conditions", "reason": "JSONLogic not supported; manual translation needed", "severity": "manual"}]})
-        out.append({"key": key, "enabled": True, "rolloutPercentage": 100,
-                    "variations": [{"key": "on", "value": "true"}, {"key": "off", "value": "false"}],
-                    "defaultVariation": 0, "rules": []})
+        continue
     return out, report
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ def convert(flags):
         out.append({"key": key, "enabled": f.get("enabled", True), "rolloutPercentage": 100,
                     "variations": [{"key": "on", "value": "true"}, {"key": "off", "value": "false"}],
                     "defaultVariation": 0, "rules": []})
-        report["clean"].append({"key": key, "reasons": []})
+        report["deviation"].append({"key": key, "reasons": [{"field": "conversion", "reason": "Flagsmith importer is a stub; review output", "severity": "deviation"}]})
     return out, report
 
 if __name__ == "__main__":
