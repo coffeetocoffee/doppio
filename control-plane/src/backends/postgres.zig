@@ -10,6 +10,10 @@ extern "c" fn PQclear(res: ?*anyopaque) callconv(.c) void;
 extern "c" fn PQfinish(conn: ?*anyopaque) callconv(.c) void;
 extern "c" fn PQresultStatus(res: ?*anyopaque) callconv(.c) c_int;
 extern "c" fn PQerrorMessage(conn: ?*anyopaque) callconv(.c) [*:0]const u8;
+extern "c" fn PQntuples(res: ?*anyopaque) callconv(.c) c_int;
+extern "c" fn PQnfields(res: ?*anyopaque) callconv(.c) c_int;
+extern "c" fn PQgetvalue(res: ?*anyopaque, row: c_int, col: c_int) callconv(.c) [*:0]const u8;
+extern "c" fn PQgetisnull(res: ?*anyopaque, row: c_int, col: c_int) callconv(.c) c_int;
 
 pub const PG_CONN_OK: c_int = 0;
 pub const PGRES_COMMAND_OK: c_int = 1;
@@ -155,6 +159,23 @@ pub const PostgresBackend = struct {
             }
         }
         return null;
+    }
+
+    /// Number of rows in a result returned by `query`.
+    pub fn rowCount(res: ?*anyopaque) c_int {
+        return PQntuples(res);
+    }
+
+    /// Text value at (row, col) in a result returned by `query`, or null when
+    /// the field is SQL NULL. The slice borrows libpq-owned memory valid until
+    /// the result is cleared.
+    pub fn rowValue(res: ?*anyopaque, row: c_int, col: c_int) ?[]const u8 {
+        if (PQgetisnull(res, row, col) != 0) return null;
+        return std.mem.span(PQgetvalue(res, row, col));
+    }
+
+    pub fn freeResult(res: ?*anyopaque) void {
+        PQclear(res);
     }
 
     pub fn initSchema(self: *PostgresBackend) void {

@@ -229,7 +229,78 @@ pub const Storage = struct {
         backend.initSchema();
         self.pg = backend;
         self.backend = .postgres;
+        try self.hydrateFromPostgres();
     }
+
+    /// Populate the in-memory working maps from Postgres so reads reflect
+    /// durable state after a restart. Reads continue to be served from memory.
+    const hydrateFromPostgres = if (build_options.enable_postgres) hydrateFromPostgresImpl else hydrateFromPostgresNoop;
+
+    fn hydrateFromPostgresImpl(self: *Storage) !void {
+        if (self.pg) |*backend| {
+            const flags_sql = try std.fmt.allocPrintSentinel(
+                self.allocator,
+                "SELECT key, enabled, rollout_percentage, version, created_at, updated_at FROM flags WHERE deleted_at IS NULL",
+                .{},
+                0,
+            );
+            defer self.allocator.free(flags_sql);
+            const res = backend.query(flags_sql);
+            if (res) |r| {
+                defer PgBackend.freeResult(r);
+                const n = PgBackend.rowCount(r);
+                var i: c_int = 0;
+                while (i < n) : (i += 1) {
+                    const key_raw = PgBackend.rowValue(r, i, 0) orelse continue;
+                    const owned = try self.allocator.dupe(u8, key_raw);
+                    const gop = try self.flags.getOrPut(owned);
+                    if (gop.found_existing) {
+                        self.allocator.free(owned);
+                    } else {
+                        gop.key_ptr.* = owned;
+                    }
+                    gop.value_ptr.* = .{
+                        .key = gop.key_ptr.*,
+                        .enabled = std.mem.eql(u8, PgBackend.rowValue(r, i, 1) orelse "f", "t"),
+                        .rollout_percentage = std.fmt.parseInt(u8, PgBackend.rowValue(r, i, 2) orelse "100", 10) catch 100,
+                        .version = std.fmt.parseInt(u64, PgBackend.rowValue(r, i, 3) orelse "1", 10) catch 1,
+                        .created_at = std.fmt.parseInt(i64, PgBackend.rowValue(r, i, 4) orelse "0", 10) catch 0,
+                        .updated_at = std.fmt.parseInt(i64, PgBackend.rowValue(r, i, 5) orelse "0", 10) catch 0,
+                    };
+                }
+            }
+
+            const seg_sql = try std.fmt.allocPrintSentinel(
+                self.allocator,
+                "SELECT key, expression FROM segments",
+                .{},
+                0,
+            );
+            defer self.allocator.free(seg_sql);
+            const seg_res = backend.query(seg_sql);
+            if (seg_res) |r| {
+                defer PgBackend.freeResult(r);
+                const n = PgBackend.rowCount(r);
+                var i: c_int = 0;
+                while (i < n) : (i += 1) {
+                    const key_raw = PgBackend.rowValue(r, i, 0) orelse continue;
+                    const expr_raw = PgBackend.rowValue(r, i, 1) orelse "";
+                    const owned_key = try self.allocator.dupe(u8, key_raw);
+                    const owned_expr = try self.allocator.dupe(u8, expr_raw);
+                    const gop = try self.segments.getOrPut(owned_key);
+                    if (gop.found_existing) {
+                        self.allocator.free(owned_key);
+                        self.allocator.free(gop.value_ptr.expression);
+                    } else {
+                        gop.key_ptr.* = owned_key;
+                    }
+                    gop.value_ptr.* = .{ .key = gop.key_ptr.*, .expression = owned_expr };
+                }
+            }
+        }
+    }
+
+    fn hydrateFromPostgresNoop(_: *Storage) !void {}
 
     fn openPostgresDisabled(_: *Storage, _: []const u8) !void {
         return error.PostgresNotEnabled;
@@ -371,8 +442,46 @@ pub const Storage = struct {
         }
         try self.execSql("COMMIT;");
         const changes: c_int = c.sqlite3_changes(db);
+        self.persistExposureBatch(rows);
         return @intCast(changes);
     }
+
+    /// Mirror an exposure batch into Postgres when that backend is active. The
+    /// partial unique index makes the insert the dedupe source of truth, so a
+    /// replayed batch stores nothing new.
+    const persistExposureBatch = if (build_options.enable_postgres) persistExposureBatchImpl else persistExposureBatchNoop;
+
+    fn persistExposureBatchImpl(self: *Storage, rows: []const ExposureRow) void {
+        if (self.backend != .postgres) return;
+        if (self.pg) |*backend| {
+            for (rows) |row| {
+                const sql = std.fmt.allocPrintSentinel(
+                    self.allocator,
+                    "INSERT INTO exposures (workspace_id, environment_id, flag_key, unit_id, enabled, variation, bucket, reason, occurred_at, received_at, idempotency_key) " ++
+                        "VALUES ('{s}', '{s}', '{s}', '{s}', {s}, {s}, {d}, '{s}', {d}, {d}, '{s}') " ++
+                        "ON CONFLICT (workspace_id, environment_id, idempotency_key) DO NOTHING",
+                    .{
+                        row.workspace_id,
+                        row.environment_id,
+                        row.flag_key,
+                        row.unit_id,
+                        if (row.enabled) "TRUE" else "FALSE",
+                        if (row.variation) |v| v else "NULL",
+                        row.bucket,
+                        row.reason,
+                        row.occurred_at,
+                        row.received_at,
+                        row.idempotency_key orelse "",
+                    },
+                    0,
+                ) catch return;
+                defer self.allocator.free(sql);
+                backend.exec(sql) catch {};
+            }
+        }
+    }
+
+    fn persistExposureBatchNoop(_: *Storage, _: []const ExposureRow) void {}
 
     /// Delete exposures older than `max_age_ms` from the oldest side. Returns
     /// the number of rows removed.
@@ -422,8 +531,39 @@ pub const Storage = struct {
             gop.value_ptr.* = applyVersion(null, record, owned, 0);
         }
         self.persistFlag(gop.value_ptr.*);
+        self.persistFlagVersion(gop.value_ptr.*, actor);
         try self.recordAudit("FLAG_UPDATE", "flag", key, actor);
     }
+
+    /// Mirror a flag version row into Postgres when that backend is active.
+    const persistFlagVersion = if (build_options.enable_postgres) persistFlagVersionImpl else persistFlagVersionNoop;
+
+    fn persistFlagVersionImpl(self: *Storage, rec: FlagRecord, actor: []const u8) void {
+        if (self.backend != .postgres) return;
+        if (self.pg) |*backend| {
+            const sql = std.fmt.allocPrintSentinel(
+                self.allocator,
+                "INSERT INTO flag_versions (id, flag_id, version, definition_json, created_at, created_by) " ++
+                    "VALUES ('{s}_v{d}', '{s}', {d}, '{{\"key\":\"{s}\",\"enabled\":{s},\"rollout_percentage\":{d}}}', {d}, '{s}')",
+                .{
+                    rec.key,
+                    rec.version,
+                    rec.key,
+                    rec.version,
+                    rec.key,
+                    if (rec.enabled) "true" else "false",
+                    rec.rollout_percentage,
+                    rec.updated_at,
+                    actor,
+                },
+                0,
+            ) catch return;
+            defer self.allocator.free(sql);
+            backend.exec(sql) catch {};
+        }
+    }
+
+    fn persistFlagVersionNoop(_: *Storage, _: FlagRecord, _: []const u8) void {}
 
     /// Free the owned strings inside edges produced by flagDependencies.
     pub fn freeDependencyEdges(self: *const Storage, edges: []const DependencyEdge) void {
@@ -445,6 +585,7 @@ pub const Storage = struct {
             gop.value_ptr.* = applyVersion(null, record, owned, now_ms);
         }
         self.persistFlag(gop.value_ptr.*);
+        self.persistFlagVersion(gop.value_ptr.*, actor);
         try self.recordAudit("FLAG_UPDATE", "flag", key, actor);
     }
 
@@ -623,8 +764,29 @@ pub const Storage = struct {
             gop.key_ptr.* = owned;
             gop.value_ptr.* = .{ .key = owned, .expression = expr_owned };
         }
+        self.persistSegment(key, expression);
         try self.recordAudit("SEGMENT_CREATE", "segment", key, actor);
     }
+
+    /// Mirror a segment row into Postgres when that backend is active.
+    const persistSegment = if (build_options.enable_postgres) persistSegmentImpl else persistSegmentNoop;
+
+    fn persistSegmentImpl(self: *Storage, key: []const u8, expression: []const u8) void {
+        if (self.backend != .postgres) return;
+        if (self.pg) |*backend| {
+            const sql = std.fmt.allocPrintSentinel(
+                self.allocator,
+                "INSERT INTO segments (id, workspace_id, key, expression, created_at) VALUES ('{s}', 'default', '{s}', '{s}', 0) " ++
+                    "ON CONFLICT (workspace_id, key) DO UPDATE SET expression = EXCLUDED.expression",
+                .{ key, key, expression },
+                0,
+            ) catch return;
+            defer self.allocator.free(sql);
+            backend.exec(sql) catch {};
+        }
+    }
+
+    fn persistSegmentNoop(_: *Storage, _: []const u8, _: []const u8) void {}
 
     /// Remove a segment and release the copies the store owns. Returns false
     /// when the key was not present.
