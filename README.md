@@ -1,12 +1,11 @@
 # Doppio ☕
 
-> Double-shot A/B comparisons — feature flags & experimentation platform.
+> Double-shot A/B comparisons — a feature-flag & experimentation platform.
 
-[![v1.0](https://img.shields.io/badge/release-v1.0-blue)](https://github.com/coffeetocoffee/doppio/releases/tag/v1.0)
+[![v2.9.3](https://img.shields.io/badge/release-v2.9.3-blue)](https://github.com/coffeetocoffee/doppio/releases/tag/v2.9.3)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
-## What is it?
-
-Doppio is a feature-flag and experimentation platform with SDKs in JS, Python, and Go, plus a Zig control plane. Evaluate flags locally, sync deltas in real time, and track exposures — all from one core.
+Evaluate flags locally, sync deltas in real time, track exposures — one core, many SDKs.
 
 ## Packages
 
@@ -15,7 +14,9 @@ Doppio is a feature-flag and experimentation platform with SDKs in JS, Python, a
 | JS SDK | `packages/js` | ✅ |
 | Python SDK | `packages/py` | ✅ |
 | Go SDK | `packages/go` | ✅ |
-| Control plane | `control-plane` | ✅ |
+| .NET SDK | `packages/dotnet` | 🚧 |
+| Kotlin SDK | `packages/kotlin` | 🚧 |
+| Control plane (Zig) | `control-plane` | ✅ |
 
 ## Quick start
 
@@ -36,6 +37,21 @@ Go SDK:
 ```bash
 cd packages/go && go test ./...
 ```
+
+Control plane:
+
+```bash
+cd control-plane && zig build -Dvalkey -Dpostgres
+./zig-out/bin/doppio-control-plane --port 8080
+```
+
+## Highlights
+
+- ⚡ Local flag evaluation with rule-based targeting
+- 🔄 Real-time delta sync (SSE, WebSocket, long-poll)
+- 📊 Exposure tracking with ClickHouse forwarding
+- 🗄️ SQLite / Postgres (HA primary+replica) / Valkey (sentinel + cluster scaffold)
+- 🔐 Casbin-backed admin auth
 
 ## License
 
