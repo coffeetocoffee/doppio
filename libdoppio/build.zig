@@ -23,7 +23,6 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(cli);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run the doppio CLI");
     run_step.dependOn(&run_cmd.step);
 
@@ -37,6 +36,26 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    const native_module = b.createModule(.{
+        .root_source_file = b.path("src/native.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "doppio", .module = doppio },
+        },
+    });
+    const native = b.addLibrary(.{
+        .name = "doppio",
+        .linkage = .dynamic,
+        .root_module = native_module,
+    });
+    const install_native = b.addInstallArtifact(native, .{
+        .dest_sub_path = "doppio",
+    });
+    const native_step = b.step("native", "Build the native shared library");
+    native_step.dependOn(&install_native.step);
+    b.getInstallStep().dependOn(&install_native.step);
 
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
