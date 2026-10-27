@@ -113,6 +113,9 @@ pub const PG_SCHEMA_DDL =
 ;
 pub const PostgresBackend = struct {
     conn: ?*anyopaque = null,
+    role: Role = .primary,
+
+    pub const Role = enum { primary, replica };
 
     pub fn connect(self: *PostgresBackend, conninfo: [:0]const u8) !void {
         self.conn = PQconnectdb(conninfo.ptr);
@@ -121,6 +124,25 @@ pub const PostgresBackend = struct {
             self.conn = null;
             return error.PostgresConnectFailed;
         }
+    }
+
+    pub fn connectWithRetry(self: *PostgresBackend, conninfo: [:0]const u8, max_attempts: u32, backoff_ms: u32) !void {
+        var attempt: u32 = 0;
+        var delay = backoff_ms;
+        while (attempt < max_attempts) : (attempt += 1) {
+            if (self.connect(conninfo)) |_| return else |_| {}
+            if (attempt + 1 < max_attempts) {
+                std.Thread.sleep(@as(u64, delay) * std.time.ns_per_ms);
+                delay = delay * 2;
+                if (delay > 1600) delay = 1600;
+            }
+        }
+        return error.PostgresConnectFailed;
+    }
+
+    pub fn isHealthy(self: *PostgresBackend) bool {
+        if (self.conn) |c| return PQstatus(c) == PG_CONN_OK;
+        return false;
     }
 
     pub fn exec(self: *PostgresBackend, sql: [:0]const u8) !void {

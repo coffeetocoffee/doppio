@@ -209,8 +209,10 @@ pub const Storage = struct {
     /// in-memory maps above are the only state, which is the case in tests.
     db: ?*c.sqlite3 = null,
     db_path: []const u8 = "",
-    /// Optional Postgres connection (only present when built with -Dpostgres).
-    pg: ?PgBackend = null,
+    /// Optional Postgres connections (only present when built with -Dpostgres).
+    /// pg_primary handles writes + schema; pg_replica (optional) handles reads.
+    pg_primary: ?PgBackend = null,
+    pg_replica: ?PgBackend = null,
 
     /// Choose the durable backend. Postgres wiring lives in backends/postgres.zig;
     /// callers should open the corresponding connection after selecting it.
@@ -221,14 +223,25 @@ pub const Storage = struct {
     /// Connect to Postgres and apply the schema. Requires -Dpostgres.
     pub const openPostgres = if (build_options.enable_postgres) openPostgresImpl else openPostgresDisabled;
 
-    fn openPostgresImpl(self: *Storage, conninfo: []const u8) !void {
-        const owned = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{conninfo}, 0);
-        defer self.allocator.free(owned);
-        var backend: PgBackend = .{};
-        try backend.connect(owned);
-        backend.initSchema();
-        self.pg = backend;
+    fn openPostgresImpl(self: *Storage, primary_conninfo: []const u8, replica_conninfo: ?[]const u8) !void {
+        const owned_primary = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{primary_conninfo}, 0);
+        defer self.allocator.free(owned_primary);
+        var primary: PgBackend = .{ .role = .primary };
+        try primary.connectWithRetry(owned_primary, 5, 100);
+        primary.initSchema();
+        self.pg_primary = primary;
         self.backend = .postgres;
+
+        if (replica_conninfo) |rc| {
+            const owned_replica = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{rc}, 0);
+            defer self.allocator.free(owned_replica);
+            var replica: PgBackend = .{ .role = .replica };
+            if (replica.connectWithRetry(owned_replica, 5, 100)) |_| {
+                self.pg_replica = replica;
+            } else |_| {
+                // fall back to primary for reads
+            }
+        }
         try self.hydrateFromPostgres();
     }
 
@@ -237,7 +250,7 @@ pub const Storage = struct {
     const hydrateFromPostgres = if (build_options.enable_postgres) hydrateFromPostgresImpl else hydrateFromPostgresNoop;
 
     fn hydrateFromPostgresImpl(self: *Storage) !void {
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             const flags_sql = try std.fmt.allocPrintSentinel(
                 self.allocator,
                 "SELECT key, enabled, rollout_percentage, version, created_at, updated_at FROM flags WHERE deleted_at IS NULL",
@@ -302,7 +315,7 @@ pub const Storage = struct {
 
     fn hydrateFromPostgresNoop(_: *Storage) !void {}
 
-    fn openPostgresDisabled(_: *Storage, _: []const u8) !void {
+    fn openPostgresDisabled(_: *Storage, _: []const u8, _: ?[]const u8) !void {
         return error.PostgresNotEnabled;
     }
 
@@ -311,7 +324,7 @@ pub const Storage = struct {
 
     fn persistFlagImpl(self: *Storage, rec: FlagRecord) void {
         if (self.backend != .postgres) return;
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             const sql = std.fmt.allocPrintSentinel(
                 self.allocator,
                 "INSERT INTO flags (id, workspace_id, environment_id, key, enabled, rollout_percentage, version, created_at, updated_at) " ++
@@ -453,7 +466,7 @@ pub const Storage = struct {
 
     fn persistExposureBatchImpl(self: *Storage, rows: []const ExposureRow) void {
         if (self.backend != .postgres) return;
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             for (rows) |row| {
                 const sql = std.fmt.allocPrintSentinel(
                     self.allocator,
@@ -517,7 +530,8 @@ pub const Storage = struct {
         }
         self.audit_events.deinit(self.allocator);
         if (comptime build_options.enable_postgres) {
-            if (self.pg) |*p| p.deinit();
+            if (self.pg_primary) |*p| p.deinit();
+            if (self.pg_replica) |*p| p.deinit();
         }
     }
 
@@ -540,7 +554,7 @@ pub const Storage = struct {
 
     fn persistFlagVersionImpl(self: *Storage, rec: FlagRecord, actor: []const u8) void {
         if (self.backend != .postgres) return;
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             const sql = std.fmt.allocPrintSentinel(
                 self.allocator,
                 "INSERT INTO flag_versions (id, flag_id, version, definition_json, created_at, created_by) " ++
@@ -773,7 +787,7 @@ pub const Storage = struct {
 
     fn persistSegmentImpl(self: *Storage, key: []const u8, expression: []const u8) void {
         if (self.backend != .postgres) return;
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             const sql = std.fmt.allocPrintSentinel(
                 self.allocator,
                 "INSERT INTO segments (id, workspace_id, key, expression, created_at) VALUES ('{s}', 'default', '{s}', '{s}', 0) " ++
@@ -839,7 +853,7 @@ pub const Storage = struct {
         timestamp: i64,
     ) void {
         if (self.backend != .postgres) return;
-        if (self.pg) |*backend| {
+        if (self.pg_primary) |*backend| {
             const sql = std.fmt.allocPrintSentinel(
                 self.allocator,
                 "INSERT INTO audit_events (id, workspace_id, action, target_type, target_id, actor, timestamp) " ++
@@ -1120,5 +1134,5 @@ test "openPostgres reports disabled unless built with -Dpostgres" {
     if (build_options.enable_postgres) return;
     var store = Storage.init(std.testing.allocator);
     defer store.deinit();
-    try std.testing.expectError(error.PostgresNotEnabled, store.openPostgres("host=localhost"));
+    try std.testing.expectError(error.PostgresNotEnabled, store.openPostgres("host=localhost", null));
 }

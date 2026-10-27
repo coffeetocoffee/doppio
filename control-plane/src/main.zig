@@ -30,6 +30,7 @@ pub fn main(init: std.process.Init) !void {
     var clickhouse_url: ?[]const u8 = null;
     var valkey_host: ?[]const u8 = null;
     var postgres_conn: ?[]const u8 = null;
+    var postgres_replica_conn: ?[]const u8 = null;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -51,6 +52,9 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, args[i], "--postgres") and i + 1 < args.len) {
             postgres_conn = args[i + 1];
             i += 1;
+        } else if (std.mem.eql(u8, args[i], "--postgres-replica") and i + 1 < args.len) {
+            postgres_replica_conn = args[i + 1];
+            i += 1;
         }
     }
 
@@ -58,7 +62,7 @@ pub fn main(init: std.process.Init) !void {
     defer app_server.deinit();
     if (clickhouse_url) |url| try app_server.hub.enableClickHouse(url);
     if (valkey_host) |vh| try app_server.hub.enableValkey(vh, 6379);
-    if (postgres_conn) |conninfo| try app_server.hub.store.openPostgres(conninfo);
+    if (postgres_conn) |conninfo| try app_server.hub.store.openPostgres(conninfo, postgres_replica_conn);
 
     const addr = try std.Io.net.IpAddress.parse(host, port);
     var tcp_server = try addr.listen(init.io, .{ .reuse_address = true });
