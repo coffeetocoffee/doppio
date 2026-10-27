@@ -19,5 +19,8 @@
   "scripts": {
     "build": "tsc",
     "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@openfeature/server-sdk": "^1.23.0"
   }
 }

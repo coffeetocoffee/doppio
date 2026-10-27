@@ -17,7 +17,7 @@
  */
 
 import { Provider, EvaluationContext, ResolutionDetails, FlagMetadata } from '@openfeature/server-sdk';
-import { Doppio, EvaluationContext as DoppioContext, FlagDefinition, EvaluationReason } from '../index.js';
+import { Doppio, EvaluationContext as DoppioContext, FlagDefinition, EvaluationReason } from './index.js';
 
 export interface DoppioProviderOptions {
   /** The initialized Doppio client instance */
@@ -26,7 +26,7 @@ export interface DoppioProviderOptions {
   valueMapper?: (value: any, type: 'boolean' | 'string' | 'number' | 'object') => any;
 }
 
-export class DoppioProvider extends Provider {
+export class DoppioProvider {
   readonly metadata: FlagMetadata = {
     name: 'Doppio Feature Flag Provider',
   };
@@ -35,7 +35,6 @@ export class DoppioProvider extends Provider {
   private valueMapper: DoppioProviderOptions['valueMapper'];
 
   constructor(options: DoppioProviderOptions) {
-    super();
     this.doppio = options.doppio;
     this.valueMapper = options.valueMapper ?? defaultValueMapper;
   }
@@ -58,9 +57,9 @@ export class DoppioProvider extends Provider {
     }
 
     // Explicit mappings for common fields
-    if (context.ip) doppioContext.custom = { ...doppioContext.custom, ip: context.ip };
-    if (context.userAgent) doppioContext.custom = { ...doppioContext.custom, userAgent: context.userAgent };
-    if (context.hostname) doppioContext.custom = { ...doppioContext.custom, hostname: context.hostname };
+    if (context.ip) doppioContext.custom = { ...doppioContext.custom, ip: String(context.ip) };
+    if (context.userAgent) doppioContext.custom = { ...doppioContext.custom, userAgent: String(context.userAgent) };
+    if (context.hostname) doppioContext.custom = { ...doppioContext.custom, hostname: String(context.hostname) };
 
     return doppioContext;
   }
@@ -90,7 +89,7 @@ export class DoppioProvider extends Provider {
     
     return {
       flagKey,
-      description: flag.variations?.map(v => `${v.key}: ${v.value}`).join(', '),
+      description: flag.variations?.map((v: any) => `${v.key}: ${v.value}`).join(', '),
     };
   }
 
