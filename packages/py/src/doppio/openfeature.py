@@ -91,7 +91,9 @@ class DoppioProvider:
         doppio_context = self._convert_context(context)
         result = self._doppio.get(flag_key, doppio_context)
 
-        if result.enabled and result.value is not None:
+        if result.reason == "DISABLED":
+            value = result.value if result.value is not None else False
+        elif result.enabled and result.value is not None:
             value = result.value
         else:
             value = default_value

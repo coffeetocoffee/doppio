@@ -1,3 +1,5 @@
+//go:build openfeature
+// +build openfeature
 // OpenFeature Provider for Doppio (Go SDK)
 //
 // Implements the OpenFeature Provider interface to allow Doppio to be used
@@ -140,3 +142,5 @@ type Resolution[T any] = struct {
 
 // constant package references (to be provided by openfeature go-sdk)
 var _ = fmt.Sprintf
+
+

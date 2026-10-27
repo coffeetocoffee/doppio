@@ -19,7 +19,11 @@ from .sync import create_sync_client
 
 
 class Doppio:
-    def __init__(self, options: DoppioOptions) -> None:
+    def __init__(self, options=None) -> None:
+        if options is None:
+            options = DoppioOptions()
+        if isinstance(options, dict):
+            options = DoppioOptions.from_mapping(options)
         self.options = options
         self.flags: Dict[str, FlagDefinition] = {}
         self.listeners: Dict[str, set] = {}

@@ -76,9 +76,12 @@ class EvaluationContext:
         if self.plan is not None:
             flat["account.plan"] = self.plan
             flat["plan"] = self.plan
+            flat["user.plan"] = self.plan
 
         for key, val in (self.custom or {}).items():
             flat[f"custom.{key}"] = val
+            flat[f"user.{key}"] = val
+            flat[key] = val
 
         flat["user_id"] = self.user_id if self.user_id is not None else unit
         flat["unit_id"] = unit

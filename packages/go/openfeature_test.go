@@ -1,3 +1,6 @@
+//go:build openfeature
+// +build openfeature
+
 package doppio_test
 
 import (
@@ -189,3 +192,5 @@ func TestProviderMissingFlagReturnsDefault(t *testing.T) {
 		t.Errorf("expected missing flag to return default true, got %v", res.Value)
 	}
 }
+
+
