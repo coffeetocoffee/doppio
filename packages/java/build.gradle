@@ -3,3 +3,9 @@ plugins {
 }
 group = 'com.doppio'
 version = '1.0.0'
+
+dependencies {
+    // Pure-Java WASM runtime: lets the SDK run libdoppio's existing
+    // doppio.wasm ABI without any JNI/native build. See Doppio.java.
+    implementation 'com.dylibso.chicory:runtime:1.2.0'
+}

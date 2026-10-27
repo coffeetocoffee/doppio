@@ -3,6 +3,12 @@ services:
   control-plane:
     image: doppio/control-plane:latest
     ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment:
       DOPPIO_DB: postgres
       DOPPIO_POSTGRES: "host=postgres user=doppio password=doppio dbname=doppio"
