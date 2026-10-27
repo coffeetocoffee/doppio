@@ -91,8 +91,22 @@ pub const PG_SCHEMA_DDL =
     \\);
     \\CREATE INDEX IF NOT EXISTS idx_flags_key ON flags(workspace_id, environment_id, key);
     \\CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_events(workspace_id, timestamp);
+    \\CREATE TABLE IF NOT EXISTS exposures (
+    \\    id TEXT PRIMARY KEY,
+    \\    workspace_id TEXT NOT NULL,
+    \\    environment_id TEXT NOT NULL,
+    \\    flag_key TEXT NOT NULL,
+    \\    unit_id TEXT NOT NULL,
+    \\    enabled BOOLEAN NOT NULL,
+    \\    variation TEXT,
+    \\    bucket INTEGER NOT NULL,
+    \\    reason TEXT NOT NULL,
+    \\    occurred_at BIGINT NOT NULL,
+    \\    received_at BIGINT NOT NULL,
+    \\    idempotency_key TEXT NOT NULL DEFAULT ''
+    \\);
+    \\CREATE UNIQUE INDEX IF NOT EXISTS idx_exposures_dedupe ON exposures(workspace_id, environment_id, idempotency_key) WHERE idempotency_key <> '';
 ;
-
 pub const PostgresBackend = struct {
     conn: ?*anyopaque = null,
 
@@ -105,11 +119,29 @@ pub const PostgresBackend = struct {
         }
     }
 
-    pub fn exec(self: *PostgresBackend, sql: [:0]const u8) void {
+    pub fn exec(self: *PostgresBackend, sql: [:0]const u8) !void {
         if (self.conn) |conn| {
             const res = PQexec(conn, sql.ptr);
-            if (res) |r| PQclear(r);
+            if (res) |r| {
+                const status = PQresultStatus(r);
+                if (status != PGRES_COMMAND_OK and status != PGRES_TUPLES_OK) {
+                    PQclear(r);
+                    return error.PostgresExecFailed;
+                }
+                PQclear(r);
+            } else {
+                return error.PostgresExecFailed;
+            }
+        } else {
+            return error.PostgresNotConnected;
         }
+    }
+
+    pub fn errorMessage(self: *PostgresBackend) []const u8 {
+        if (self.conn) |c| {
+            return std.mem.span(PQerrorMessage(c));
+        }
+        return "not connected";
     }
 
     pub fn query(self: *PostgresBackend, sql: [:0]const u8) ?*anyopaque {
@@ -126,7 +158,7 @@ pub const PostgresBackend = struct {
     }
 
     pub fn initSchema(self: *PostgresBackend) void {
-        self.exec(PG_SCHEMA_DDL);
+        self.exec(PG_SCHEMA_DDL) catch {};
     }
 
     pub fn deinit(self: *PostgresBackend) void {

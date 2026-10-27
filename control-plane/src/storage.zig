@@ -259,7 +259,7 @@ pub const Storage = struct {
                 0,
             ) catch return;
             defer self.allocator.free(sql);
-            backend.exec(sql);
+            backend.exec(sql) catch {};
         }
     }
 
@@ -686,7 +686,7 @@ pub const Storage = struct {
                 0,
             ) catch return;
             defer self.allocator.free(sql);
-            backend.exec(sql);
+            backend.exec(sql) catch {};
         }
     }
 
