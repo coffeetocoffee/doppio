@@ -1,0 +1,6 @@
+{
+  "name": "doppio-importer",
+  "version": "1.0.0",
+  "bin": { "doppio-import": "index.js" },
+  "type": "commonjs"
+}
