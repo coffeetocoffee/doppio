@@ -215,9 +215,9 @@ pub const SyncHub = struct {
 
     const publishValkey = if (build_options.enable_valkey) publishValkeyImpl else publishValkeyNoop;
 
-    fn publishValkeyImpl(self: *SyncHub, seq: u64) void {
+    fn publishValkeyImpl(self: *SyncHub, seq: u64, key: []const u8, deleted: bool, enabled: bool, rollout: u8) void {
         if (self.valkey_backend) |*v| {
-            const msg = std.fmt.allocPrintSentinel(self.allocator, "delta:{d}", .{seq}, 0) catch return;
+            const msg = std.fmt.allocPrintSentinel(self.allocator, "delta:{d}:{s}:{d}:{d}:{d}", .{ seq, key, @intFromBool(deleted), @intFromBool(enabled), rollout }, 0) catch return;
             defer self.allocator.free(msg);
             const chan = std.fmt.allocPrintSentinel(self.allocator, "{s}", .{"doppio:flags"}, 0) catch return;
             defer self.allocator.free(chan);
@@ -225,7 +225,57 @@ pub const SyncHub = struct {
         }
     }
 
-    fn publishValkeyNoop(_: *SyncHub, _: u64) void {}
+    fn publishValkeyNoop(_: *SyncHub, _: u64, _: []const u8, _: bool, _: bool, _: u8) void {}
+
+    /// Blocking subscriber loop: consumes Valkey pub/sub messages on
+    /// "doppio:flags" and applies each "delta:N" to the local store. Intended
+    /// to be run on a dedicated thread. Returns when the connection drops.
+    pub fn runValkeySubscriber(self: *SyncHub, io: Io, host: []const u8, port: c_int) void {
+        if (!build_options.enable_valkey) return;
+        const owned = std.fmt.allocPrintSentinel(self.allocator, "{s}", .{host}, 0) catch return;
+        defer self.allocator.free(owned);
+        var backend: ValkeyBackend = .{};
+        backend.connect(owned, port) catch return;
+        defer backend.deinit();
+        const channel = std.fmt.allocPrintSentinel(self.allocator, "{s}", .{"doppio:flags"}, 0) catch return;
+        defer self.allocator.free(channel);
+        _ = backend.subscribe(channel);
+        while (true) {
+            var reply_ptr: ?*anyopaque = null;
+            const rc = valkey.redisGetReply(backend.ctx, &reply_ptr);
+            if (rc != 0) break;
+            if (reply_ptr) |r| {
+                const reply: *valkey.redisReply = @ptrCast(@alignCast(r));
+                if (reply.type == 2 and reply.elements >= 3) {
+                    const kind = reply.element[0];
+                    const payload = reply.element[2];
+                    if (kind.str != null and payload.str != null and
+                        std.mem.eql(u8, kind.str[0..kind.len], "message"))
+                    {
+                        const msg = payload.str[0..payload.len];
+                        // parse "delta:seq:key:deleted:enabled:rollout"
+                        var it = std.mem.splitScalar(u8, msg, ':');
+                        _ = it.next(); // "delta"
+                        const seq_str = it.next() orelse "";
+                        const key = it.next() orelse "";
+                        const del_str = it.next() orelse "0";
+                        const en_str = it.next() orelse "0";
+                        const roll_str = it.next() orelse "100";
+                        const seq = std.fmt.parseUnsigned(u64, seq_str, 10) catch 0;
+                        const deleted = std.mem.eql(u8, del_str, "1");
+                        const enabled = std.mem.eql(u8, en_str, "1");
+                        const rollout: u8 = std.fmt.parseInt(u8, roll_str, 10) catch 100;
+                        if (seq > 0 and key.len > 0 and seq != self.current_seq) {
+                            self.lock(io);
+                            _ = self.recordChangeLocked(io, key, deleted, enabled, rollout) catch {};
+                            self.unlock(io);
+                        }
+                    }
+                }
+                valkey.freeReplyObject(r);
+            }
+        }
+    }
 
     /// Cache a flag definition in Valkey (shared across nodes) with a 60s TTL.
     pub const cacheFlag = if (build_options.enable_valkey) cacheFlagImpl else cacheFlagNoop;
@@ -357,7 +407,7 @@ pub const SyncHub = struct {
             try self.broadcastLocked(io, delta.json);
         }
         // Fan out to other nodes when Valkey is enabled.
-        self.publishValkey(self.current_seq);
+        self.publishValkey(self.current_seq, key, deleted, enabled, rollout_percentage);
         // Warm the shared flag cache with the latest definition.
         {
             const cached = std.fmt.allocPrint(

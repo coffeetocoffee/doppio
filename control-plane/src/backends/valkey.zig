@@ -3,8 +3,19 @@ const std = @import("std");
 
 extern "c" fn redisConnect(ip: [*:0]const u8, port: c_int) callconv(.c) ?*anyopaque;
 extern "c" fn redisCommand(ctx: ?*anyopaque, format: [*:0]const u8, ...) callconv(.c) ?*anyopaque;
+extern "c" fn redisGetReply(ctx: ?*anyopaque, reply: *?*anyopaque) callconv(.c) c_int;
 extern "c" fn freeReplyObject(obj: ?*anyopaque) callconv(.c) void;
 extern "c" fn redisFree(ctx: ?*anyopaque) callconv(.c) void;
+
+pub const redisReply = extern struct {
+    type: c_int,
+    integer: c_longlong,
+    dval: f64,
+    str: [*c]u8,
+    len: usize,
+    elements: usize,
+    element: [*c]*redisReply,
+};
 
 pub const ValkeyBackend = struct {
     ctx: ?*anyopaque = null,
@@ -31,6 +42,13 @@ pub const ValkeyBackend = struct {
     pub fn get(self: *ValkeyBackend, key: [:0]const u8) ?*anyopaque {
         if (self.ctx) |c| {
             return redisCommand(c, "GET %s", key.ptr);
+        }
+        return null;
+    }
+
+    pub fn subscribe(self: *ValkeyBackend, channel: [:0]const u8) ?*anyopaque {
+        if (self.ctx) |c| {
+            return redisCommand(c, "SUBSCRIBE %s", channel.ptr);
         }
         return null;
     }
